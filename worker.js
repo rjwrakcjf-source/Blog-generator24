@@ -1,6 +1,7 @@
 /**
  * Cloudflare Worker for Blog Generator
  * Serves React app and provides /api/generate endpoint with Workers AI
+ * No external APIs or secrets required - uses env.AI directly
  */
 
 import { Router } from 'itty-router';
@@ -10,28 +11,34 @@ const router = Router();
 /**
  * Serve React SPA from build directory
  */
-async function serveAsset(path, env) {
+async function serveAsset(pathname, env) {
   try {
-    // Remove leading slash and get the asset
-    const cleanPath = path === '/' ? 'index.html' : path.replace(/^\//, '');
+    // Normalize path
+    let assetPath = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
     
-    // Try to get the asset from Workers KV or build directory
-    if (env.ASSETS && env.ASSETS.get) {
-      const asset = await env.ASSETS.get(cleanPath);
+    // Try to get the asset
+    if (env.ASSETS) {
+      const asset = await env.ASSETS.get(assetPath);
       if (asset) {
-        const contentType = getContentType(cleanPath);
+        const contentType = getContentType(assetPath);
         return new Response(asset, {
-          headers: { 'Content-Type': contentType },
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': assetPath.includes('.') ? 'public, max-age=31536000' : 'no-cache',
+          },
         });
       }
     }
 
-    // Fallback to index.html for SPA routing
-    if (env.ASSETS && env.ASSETS.get) {
+    // Fallback to index.html for SPA routing (only for non-API paths)
+    if (!assetPath.startsWith('api/') && env.ASSETS) {
       const html = await env.ASSETS.get('index.html');
-      if (html && cleanPath !== 'index.html') {
+      if (html) {
         return new Response(html, {
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache',
+          },
         });
       }
     }
@@ -44,23 +51,39 @@ async function serveAsset(path, env) {
 }
 
 /**
- * Generate blog post using Cloudflare Workers AI
+ * Generate blog post using Cloudflare Workers AI (Llama 2)
+ * No secrets required - uses env.AI binding
  */
-async function generateBlogPost(request, env, ctx) {
+async function generateBlogPost(request, env) {
   try {
-    if (!env.ACCOUNT_ID || !env.API_TOKEN) {
-      return new Response(
-        JSON.stringify({ error: 'Missing API credentials. Set ACCOUNT_ID and API_TOKEN secrets.' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+    if (!env.AI) {
+      return jsonResponse(
+        { error: 'Workers AI not available in this environment' },
+        500
       );
     }
 
-    const { topic, tone = 'professional', length = 'medium' } = await request.json();
+    const body = await request.json();
+    const { topic, tone = 'professional', length = 'medium' } = body;
 
-    if (!topic) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required parameter: topic' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+    if (!topic || typeof topic !== 'string' || topic.trim().length === 0) {
+      return jsonResponse(
+        { error: 'Missing or invalid required parameter: topic' },
+        400
+      );
+    }
+
+    if (!['professional', 'casual', 'technical', 'creative'].includes(tone)) {
+      return jsonResponse(
+        { error: 'Invalid tone. Use: professional, casual, technical, or creative' },
+        400
+      );
+    }
+
+    if (!['short', 'medium', 'long'].includes(length)) {
+      return jsonResponse(
+        { error: 'Invalid length. Use: short, medium, or long' },
+        400
       );
     }
 
@@ -71,59 +94,81 @@ async function generateBlogPost(request, env, ctx) {
       long: 1000,
     };
 
-    const maxTokens = lengthMap[length] || 600;
+    const maxTokens = lengthMap[length];
+    const cleanTopic = topic.trim().substring(0, 200);
 
-    // Call Cloudflare Workers AI
+    // Create the prompt
+    const prompt = `You are an expert blog writer. Write a ${length} blog post about "${cleanTopic}" in a ${tone} tone.
+
+Structure the post with:
+- An engaging title (as # Heading)
+- An introduction paragraph
+- 2-3 main sections with ## subheadings
+- A conclusion
+- Use markdown formatting for readability
+
+Keep the content informative and engaging.`;
+
+    // Call Workers AI with Llama 2 model
     const response = await env.AI.run('@cf/meta/llama-2-7b-chat-int8', {
-      prompt: `Write a ${length} blog post about "${topic}" in a ${tone} tone. 
-      
-      The post should be well-structured with:
-      - An engaging introduction
-      - 2-3 main sections with subheadings
-      - A thoughtful conclusion
-      
-      Format the response in markdown.`,
+      prompt,
       max_tokens: maxTokens,
     });
 
-    // Extract the generated text
-    const generatedText = response.result?.response || '';
+    if (!response || !response.result) {
+      return jsonResponse(
+        { error: 'AI generation failed - no response from model' },
+        500
+      );
+    }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        topic,
-        tone,
-        length,
-        content: generatedText,
-        model: '@cf/meta/llama-2-7b-chat-int8',
-      }),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      }
-    );
+    const generatedText = response.result.response || '';
+
+    if (!generatedText || generatedText.trim().length === 0) {
+      return jsonResponse(
+        { error: 'AI model returned empty response' },
+        500
+      );
+    }
+
+    return jsonResponse({
+      success: true,
+      topic: cleanTopic,
+      tone,
+      length,
+      content: generatedText.trim(),
+      model: '@cf/meta/llama-2-7b-chat-int8',
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
-    console.error('Generation error:', error);
-    return new Response(
-      JSON.stringify({ error: error.message || 'Failed to generate blog post' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    console.error('Blog generation error:', error);
+    const errorMessage = error instanceof SyntaxError
+      ? 'Invalid JSON in request body'
+      : error.message || 'Failed to generate blog post';
+    return jsonResponse({ error: errorMessage }, 500);
   }
 }
 
 /**
- * Determine content type based on file extension
+ * Health check endpoint
+ */
+function healthCheck() {
+  return jsonResponse({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    service: 'blog-generator',
+  });
+}
+
+/**
+ * Get content type based on file extension
  */
 function getContentType(path) {
   const ext = path.split('.').pop().toLowerCase();
   const types = {
     html: 'text/html; charset=utf-8',
-    css: 'text/css',
-    js: 'application/javascript',
+    css: 'text/css; charset=utf-8',
+    js: 'application/javascript; charset=utf-8',
     json: 'application/json',
     png: 'image/png',
     jpg: 'image/jpeg',
@@ -134,23 +179,29 @@ function getContentType(path) {
     woff: 'font/woff',
     woff2: 'font/woff2',
     ttf: 'font/ttf',
+    webp: 'image/webp',
+    mp4: 'video/mp4',
   };
   return types[ext] || 'application/octet-stream';
 }
 
 /**
- * CORS middleware
+ * Helper to create JSON responses with CORS headers
  */
-function withCORS(response) {
-  const headers = new Headers(response.headers);
-  headers.set('Access-Control-Allow-Origin', '*');
-  headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Content-Type');
-  return new Response(response.body, { ...response, headers });
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
 }
 
 /**
- * Handle preflight requests
+ * Handle preflight CORS requests
  */
 router.options('*', () => {
   return new Response(null, {
@@ -164,25 +215,17 @@ router.options('*', () => {
 });
 
 /**
- * API route for generating blog posts
+ * API endpoints
  */
 router.post('/api/generate', generateBlogPost);
-
-/**
- * Health check endpoint
- */
-router.get('/api/health', () => {
-  return new Response(JSON.stringify({ status: 'ok' }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
-});
+router.get('/api/health', healthCheck);
 
 /**
  * Catch-all for React SPA - serve index.html for client-side routing
  */
-router.all('*', ({ request, env, ctx }) => {
-  return serveAsset(new URL(request.url).pathname, env);
+router.all('*', ({ request, env }) => {
+  const url = new URL(request.url);
+  return serveAsset(url.pathname, env);
 });
 
 /**
@@ -192,10 +235,19 @@ export default {
   async fetch(request, env, ctx) {
     try {
       const response = await router.handle(request, env, ctx);
-      return withCORS(response);
+      return response;
     } catch (error) {
       console.error('Request error:', error);
-      return new Response('Internal Server Error', { status: 500 });
+      return new Response(
+        JSON.stringify({ error: 'Internal Server Error' }),
+        {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      );
     }
   },
 };
