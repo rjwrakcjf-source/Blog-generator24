@@ -1,0 +1,123 @@
+{
+  "version": "1.0.0",
+  "apis": [
+    {
+      "name": "Blog Generation",
+      "endpoint": "/api/blog/generate",
+      "method": "POST",
+      "description": "Generate a complete blog post with images and SEO optimization",
+      "requestBody": {
+        "niche": "string (required) - One of 25 supported niches",
+        "keyword": "string (required) - Focus keyword for the blog",
+        "imageCount": "number (optional) - Number of images to generate (4-6, default: 5)",
+        "language": "string (optional) - Language code (default: en)"
+      },
+      "responseExample": {
+        "title": "string",
+        "slug": "string",
+        "metaDescription": "string",
+        "content": "string (HTML)",
+        "images": "array of image objects",
+        "seoReport": "object with SEO analysis",
+        "wordCount": "number",
+        "generatedAt": "ISO timestamp"
+      }
+    },
+    {
+      "name": "Get News",
+      "endpoint": "/api/news/:niche",
+      "method": "GET",
+      "description": "Get recent news for a specific niche",
+      "queryParams": {
+        "limit": "number (optional) - Number of items to return (default: 10)"
+      },
+      "responseExample": {
+        "success": "boolean",
+        "niche": "string",
+        "count": "number",
+        "items": "array of news items"
+      }
+    },
+    {
+      "name": "List All Niches",
+      "endpoint": "/api/news/list/all",
+      "method": "GET",
+      "description": "Get list of all supported niches",
+      "responseExample": {
+        "niches": "array of niche IDs",
+        "total": "number"
+      }
+    },
+    {
+      "name": "Generate Images",
+      "endpoint": "/api/image/generate",
+      "method": "POST",
+      "description": "Generate AI images for a topic",
+      "requestBody": {
+        "niche": "string (required)",
+        "topic": "string (required)",
+        "count": "number (optional) - Default: 5"
+      },
+      "responseExample": {
+        "success": "boolean",
+        "images": "array of image objects"
+      }
+    },
+    {
+      "name": "Image Preview",
+      "endpoint": "/api/image/preview/:imageId",
+      "method": "GET",
+      "description": "Get preview of a generated image",
+      "responseType": "image/webp"
+    }
+  ],
+  "supportedNiches": [
+    "cryptocurrency",
+    "artificial_intelligence",
+    "cybersecurity",
+    "personal_finance",
+    "digital_marketing",
+    "software_development",
+    "real_estate",
+    "ecommerce",
+    "blockchain",
+    "renewable_energy",
+    "technology",
+    "health",
+    "finance",
+    "sports",
+    "travel",
+    "food",
+    "fashion",
+    "business",
+    "science",
+    "gaming",
+    "lifestyle",
+    "productivity",
+    "psychology",
+    "education",
+    "automotive"
+  ],
+  "features": [
+    "2,500-5,000+ words per blog post",
+    "4-6 AI-generated images per post",
+    "SEO optimization (90+ score)",
+    "Zero fabricated statistics",
+    "Proper heading hierarchy (H1-H3)",
+    "Image alt text on all images",
+    "Flesch reading score 60-70",
+    "Natural keyword density 1-2%",
+    "Schema markup (Article, FAQ, HowTo)",
+    "Open Graph & Twitter Cards",
+    "Canonical URLs",
+    "hreflang alternatives (en, es, fr, de, zh)",
+    "XML Sitemap generation",
+    "Robots.txt with AI crawler support",
+    "Real-time RSS feed integration",
+    "Mobile responsive design",
+    "Dark theme UI",
+    "Live generation progress tracking",
+    "Download HTML functionality",
+    "Image preview links with copy-to-clipboard"
+  ]
+}
