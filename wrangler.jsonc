@@ -1,0 +1,93 @@
+/**
+ * Cloudflare Wrangler Configuration
+ * For deploying Blog Generator to Cloudflare Workers
+ */
+{
+  // Project name
+  "name": "blog-generator",
+  
+  // Main worker script
+  "main": "worker.js",
+  
+  // Compatibility date for Workers runtime
+  "compatibility_date": "2024-12-16",
+  
+  // Build configuration
+  "build": {
+    "command": "npm run build",
+    "cwd": ".",
+    "watch_paths": ["client/**/*.{ts,tsx,js,jsx}"]
+  },
+  
+  // Environment configurations
+  "env": {
+    // Production environment
+    "production": {
+      "name": "blog-generator-prod",
+      "routes": [
+        {
+          "pattern": "blog-generator.workers.dev",
+          "zone_name": "workers.dev"
+        }
+      ],
+      "vars": {
+        "ENVIRONMENT": "production"
+      }
+    },
+    
+    // Development environment
+    "development": {
+      "name": "blog-generator-dev",
+      "vars": {
+        "ENVIRONMENT": "development"
+      }
+    }
+  },
+  
+  // Workers AI binding
+  "ai": {
+    "binding": "AI"
+  },
+  
+  // KV namespace for assets (React build)
+  "kv_namespaces": [
+    {
+      "binding": "ASSETS",
+      "id": "",
+      "preview_id": ""
+    }
+  ],
+  
+  // Secrets (set via `wrangler secret put`)
+  // Add these via CLI:
+  // wrangler secret put ACCOUNT_ID
+  // wrangler secret put API_TOKEN
+  
+  // Upload rules for static assets
+  "rules": [
+    {
+      "type": "CompiledContentType",
+      "globs": ["**/*.js"],
+      "fallthrough": true
+    },
+    {
+      "type": "Text",
+      "globs": ["**/*.html", "**/*.css"]
+    }
+  ],
+  
+  // Limits
+  "limits": {
+    "cpu_ms": 50000
+  },
+  
+  // Site configuration for serving React build
+  "site": {
+    "bucket": "./client/dist"
+  },
+  
+  // Observability
+  "observability": {
+    "enabled": true
+  }
+}
